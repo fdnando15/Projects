@@ -1,0 +1,5 @@
+# Compilados y librerias descargadas por PlatformIO
+.pio/
+
+# Configuracion local de VS Code (rutas absolutas, se regenera)
+.vscode/
