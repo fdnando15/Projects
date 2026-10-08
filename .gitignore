@@ -3,3 +3,6 @@
 
 # Configuracion local de VS Code (rutas absolutas, se regenera)
 .vscode/
+
+# Proyecto del rele: fuera del repositorio
+Rele/

@@ -1,14 +1,5 @@
-/*
-  Heltec WiFi LoRa 32 V3 (ESP32-S3 + SX1262)
-  DHT11 -> LoRaWAN OTAA -> ChirpStack
-
-  Payload de 4 bytes (big-endian):
-    [0..1] temperatura  int16   en centesimas de grado  (2350 = 23.50 C)
-    [2..3] humedad      uint16  en centesimas de %      (4520 = 45.20 %)
-
-  Las nonces y la sesion se guardan en NVS (flash) para que ChirpStack no
-  rechace los rejoin y para no perder el contador de trama al reiniciar.
-*/
+// DHT11 -> LoRaWAN OTAA -> ChirpStack
+// Payload: temperatura int16 x100, humedad uint16 x100 (big-endian)
 
 #include <Arduino.h>
 #include <Preferences.h>
@@ -18,9 +9,6 @@
 DHT dht(DHT_PIN, DHT_TYPE);
 Preferences store;
 
-// ---------------------------------------------------------------------------
-// Persistencia en NVS
-// ---------------------------------------------------------------------------
 static void saveNonces() {
   uint8_t* buf = node.getBufferNonces();
   store.putBytes("nonces", buf, RADIOLIB_LORAWAN_NONCES_BUF_SIZE);
@@ -31,13 +19,12 @@ static void saveSession() {
   store.putBytes("session", buf, RADIOLIB_LORAWAN_SESSION_BUF_SIZE);
 }
 
-// Primer arranque: fuerza el DevNonce inicial para no repetir los que
-// ChirpStack ya conoce de sesiones anteriores.
+// Fija el DevNonce inicial para no repetir los que ChirpStack ya conoce
 static void seedDevNonce() {
   uint8_t* buf = node.getBufferNonces();
   buf[RADIOLIB_LORAWAN_NONCES_DEV_NONCE]     = highByte(devNonceStart);
   buf[RADIOLIB_LORAWAN_NONCES_DEV_NONCE + 1] = lowByte(devNonceStart);
-  buf = node.getBufferNonces();            // recalcula la firma del buffer
+  buf = node.getBufferNonces();            // recalcula la firma
 
   uint8_t copy[RADIOLIB_LORAWAN_NONCES_BUF_SIZE];
   memcpy(copy, buf, sizeof(copy));
@@ -46,7 +33,7 @@ static void seedDevNonce() {
   Serial.println(devNonceStart);
 }
 
-// Devuelve true si se ha restaurado una sesion valida (no hace falta join).
+// true si se restaura la sesion de NVS y no hace falta join
 static bool restoreSession() {
   uint8_t nonces[RADIOLIB_LORAWAN_NONCES_BUF_SIZE];
   uint8_t session[RADIOLIB_LORAWAN_SESSION_BUF_SIZE];
@@ -64,7 +51,6 @@ static bool restoreSession() {
     return false;
   }
 
-  // Si lo guardado esta por debajo del minimo configurado, saltar por encima
   uint16_t stored = ((uint16_t)nonces[RADIOLIB_LORAWAN_NONCES_DEV_NONCE] << 8) |
                     nonces[RADIOLIB_LORAWAN_NONCES_DEV_NONCE + 1];
   if (stored < devNonceStart) {
@@ -90,15 +76,12 @@ static bool restoreSession() {
   return false;
 }
 
-// ---------------------------------------------------------------------------
-// Join OTAA con reintentos
-// ---------------------------------------------------------------------------
 static void joinNetwork() {
   Serial.println(F("Haciendo join OTAA contra ChirpStack..."));
   uint8_t attempt = 0;
   while (true) {
     int16_t state = node.activateOTAA();
-    saveNonces();   // la DevNonce se incrementa en CADA intento: guardarla siempre
+    saveNonces();   // el DevNonce sube en cada intento
 
     if (state == RADIOLIB_LORAWAN_NEW_SESSION) {
       Serial.println(F("Join correcto"));
@@ -112,7 +95,6 @@ static void joinNetwork() {
     Serial.print(F("): "));
     Serial.println(stateDecode(state));
 
-    // Espera creciente para no saturar el canal ni el duty cycle
     uint32_t wait = min<uint32_t>(30UL * attempt, 300UL);
     Serial.print(F("Reintento en "));
     Serial.print(wait);
@@ -121,15 +103,12 @@ static void joinNetwork() {
   }
 }
 
-// ---------------------------------------------------------------------------
 void setup() {
   Serial.begin(115200);
-  delay(3000);                       // margen para abrir el monitor serie
+  delay(3000);
   Serial.println(F("\n=== Nodo DHT11 -> LoRaWAN ==="));
 
-  // Diagnostico del cableado: con el sensor bien conectado y en reposo, la
-  // linea DATA debe leerse en ALTO (HIGH). LOW = cortocircuito a GND, pin
-  // equivocado o sensor sin alimentar.
+  // Comprobacion del cableado: en reposo DATA debe estar en HIGH
   pinMode(DHT_PIN, INPUT_PULLUP);
   delay(100);
   Serial.print(F("Nivel en reposo de DATA (GPIO "));
@@ -137,10 +116,7 @@ void setup() {
   Serial.print(F("): "));
   Serial.println(digitalRead(DHT_PIN) ? F("HIGH (ok)") : F("LOW (revisa cableado)"));
 
-  // Sonda cruda: manda la senal de inicio del DHT (DATA a LOW 20 ms) y cuenta
-  // cuantos flancos responde el sensor en los 6 ms siguientes.
-  //   0 flancos       -> el sensor no esta (sin VCC/GND o DATA no llega al pin)
-  //   ~80 flancos     -> el sensor responde; si la libreria falla es timing
+  // Senal de inicio y conteo de flancos de respuesta (0 = no hay sensor)
   pinMode(DHT_PIN, OUTPUT);
   digitalWrite(DHT_PIN, LOW);
   delay(20);
@@ -169,10 +145,9 @@ void setup() {
   uint64_t devEUI  = DEV_EUI;
   uint8_t appKey[] = { APP_KEY };
 
-  state = node.beginOTAA(joinEUI, devEUI, NULL, appKey);   // NULL = LoRaWAN 1.0.x (sin NwkKey)
+  state = node.beginOTAA(joinEUI, devEUI, NULL, appKey);   // LoRaWAN 1.0.x
   debug(state != RADIOLIB_ERR_NONE, F("Fallo al configurar OTAA"), state, true);
 
-  // Respeta el 1% de duty cycle legal en EU868
   node.setDutyCycle(true, 1250);
 
   store.begin("lorawan", false);
@@ -183,13 +158,12 @@ void setup() {
   Serial.println(F("Listo\n"));
 }
 
-// ---------------------------------------------------------------------------
 void loop() {
   float humidity    = dht.readHumidity();
-  float temperature = dht.readTemperature();   // Celsius
+  float temperature = dht.readTemperature();
 
   if (isnan(humidity) || isnan(temperature)) {
-    Serial.println(F("Lectura del DHT11 fallida (revisa cableado/pull-up)"));
+    Serial.println(F("Lectura del DHT11 fallida"));
     delay(2500);
     return;
   }
@@ -225,7 +199,7 @@ void loop() {
     Serial.println(F("Uplink enviado (sin downlink)"));
   }
 
-  saveSession();   // guarda el frame counter actualizado
+  saveSession();   // guarda el contador de tramas
 
   Serial.print(F("Siguiente envio en "));
   Serial.print(uplinkIntervalSeconds);

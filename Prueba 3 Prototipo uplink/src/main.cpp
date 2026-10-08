@@ -41,7 +41,7 @@ void setup() {
     while (true);
   }
 
-  // EU868: limite legal 14 dBm ERP (ETSI EN 300 220)
+  // 14 dBm, maximo en EU868
   radio.setOutputPower(14);
 
   node.beginOTAA(joinEUI, devEUI, NULL, appKey);

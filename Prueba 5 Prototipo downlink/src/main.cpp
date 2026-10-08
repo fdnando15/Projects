@@ -1,20 +1,5 @@
-// ============================================================================
-//  Heltec WiFi LoRa 32 V3  +  RadioLib (LoRaWAN OTAA)  +  ChirpStack
-//
-//  Flujo:
-//    Frontend -> API ChirpStack (encola un downlink con un número)
-//             -> Gateway -> SX1262 de la placa -> pantalla OLED
-//
-//  El dispositivo trabaja en CLASE C: tras el join deja la radio escuchando
-//  de forma continua en la ventana RX2, así que ChirpStack puede entregar el
-//  downlink en cuanto se encola, sin esperar a que el nodo transmita.
-//  Además se envía un uplink de "latido" cada UPLINK_INTERVAL_MS para que
-//  ChirpStack vea el dispositivo activo. El número recibido se guarda y se
-//  muestra en la OLED hasta que llegue otro.
-//
-//  Formato del downlink (debe coincidir con encodeDownlink() en ChirpStack):
-//  entero binario big-endian de 1 a 4 bytes. Ej.: 200 -> [0xC8]
-// ============================================================================
+// Downlink ChirpStack -> Heltec V3 -> OLED, en Clase C
+// Payload del downlink: entero big-endian de 1 a 4 bytes
 
 #include <Arduino.h>
 #include <RadioLib.h>
@@ -23,54 +8,34 @@
 
 #include "credentials.h"
 
-// ----------------------------------------------------------------------------
-// 1. Pines de la Heltec WiFi LoRa 32 V3
-// ----------------------------------------------------------------------------
-// SX1262 (radio LoRa) conectado por SPI al ESP32-S3
-static const int8_t LORA_NSS   = 8;    // Chip select
-static const int8_t LORA_DIO1  = 14;   // Interrupción (TX done / RX done)
-static const int8_t LORA_RST   = 12;   // Reset del chip
-static const int8_t LORA_BUSY  = 13;   // Señal "ocupado" del SX1262
+// Pines SX1262
+static const int8_t LORA_NSS   = 8;
+static const int8_t LORA_DIO1  = 14;
+static const int8_t LORA_RST   = 12;
+static const int8_t LORA_BUSY  = 13;
 
-// OLED SSD1306 128x64 por I2C (bus dedicado, distinto del I2C "normal")
+// Pines OLED
 static const int8_t OLED_SDA   = 17;
 static const int8_t OLED_SCL   = 18;
 static const int8_t OLED_RST   = 21;
-static const int8_t VEXT_PIN   = 36;   // Alimentación de la OLED: LOW = encendida
+static const int8_t VEXT_PIN   = 36;   // alimentacion OLED, LOW = encendida
 
-// ----------------------------------------------------------------------------
-// 2. Parámetros de la aplicación
-// ----------------------------------------------------------------------------
-static const uint32_t UPLINK_INTERVAL_MS = 300000; // latido cada 5 min (en Clase C los downlinks llegan solos)
-static const uint8_t  FPORT              = 1;      // puerto LoRaWAN usado (1..223)
+static const uint32_t UPLINK_INTERVAL_MS = 300000; // latido cada 5 min
+static const uint8_t  FPORT              = 1;
 
-// ----------------------------------------------------------------------------
-// 3. Objetos globales
-// ----------------------------------------------------------------------------
-// Driver del SX1262. Module(NSS, DIO1, RESET, BUSY)
 SX1262 radio = new Module(LORA_NSS, LORA_DIO1, LORA_RST, LORA_BUSY);
-
-// Nodo LoRaWAN sobre esa radio, banda europea 868 MHz.
-// (Otras regiones: US915, AU915, AS923... para US915/AU915 añade subBand = 2)
 LoRaWANNode node(&radio, &EU868);
 
-// Pantalla: modo "F" = frame buffer completo en RAM (más cómodo para dibujar)
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, OLED_RST, OLED_SCL, OLED_SDA);
 
-// Memoria no volátil (NVS) para guardar los nonces de LoRaWAN entre reinicios
 Preferences prefs;
 
-// Estado de la aplicación
-static int32_t  ultimoNumero    = -1;      // -1 = todavía no hemos recibido nada
+static int32_t  ultimoNumero    = -1;      // -1 = nada recibido aun
 static uint32_t uplinksEnviados = 0;
 static uint32_t ultimoUplinkMs  = 0;
 
-// ----------------------------------------------------------------------------
-// 4. Pantalla OLED
-// ----------------------------------------------------------------------------
+// ---------------- OLED ----------------
 void oledInit() {
-  // La OLED de la Heltec V3 se alimenta a través de "Vext". Hay que ponerlo a
-  // LOW para que reciba corriente; si no, la pantalla no responde.
   pinMode(VEXT_PIN, OUTPUT);
   digitalWrite(VEXT_PIN, LOW);
   delay(50);
@@ -79,8 +44,6 @@ void oledInit() {
   u8g2.setContrast(255);
 }
 
-// Muestra un mensaje de estado (dos líneas pequeñas). Se usa durante el
-// arranque y el join.
 void oledEstado(const char* linea1, const char* linea2 = "") {
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x12_tr);
@@ -89,29 +52,24 @@ void oledEstado(const char* linea1, const char* linea2 = "") {
   u8g2.sendBuffer();
 }
 
-// Pantalla principal: número grande en el centro + info pequeña abajo.
 void oledMostrarNumero() {
   u8g2.clearBuffer();
 
-  // Cabecera
   u8g2.setFont(u8g2_font_6x12_tr);
   u8g2.drawStr(0, 10, "ChirpStack -> ESP32");
   u8g2.drawHLine(0, 13, 128);
 
-  // Número grande (o texto de espera si aún no ha llegado ninguno)
   char buf[24];
   if (ultimoNumero < 0) {
     u8g2.setFont(u8g2_font_9x15_tr);
     snprintf(buf, sizeof(buf), "Esperando...");
   } else {
-    u8g2.setFont(u8g2_font_logisoso28_tn);   // fuente grande, solo dígitos
+    u8g2.setFont(u8g2_font_logisoso28_tn);
     snprintf(buf, sizeof(buf), "%ld", (long)ultimoNumero);
   }
-  // Centrar horizontalmente
   int ancho = u8g2.getStrWidth(buf);
   u8g2.drawStr((128 - ancho) / 2, 48, buf);
 
-  // Pie: contador de uplinks para ver que "sigue vivo"
   u8g2.setFont(u8g2_font_5x8_tr);
   snprintf(buf, sizeof(buf), "uplinks: %lu", (unsigned long)uplinksEnviados);
   u8g2.drawStr(0, 63, buf);
@@ -119,15 +77,10 @@ void oledMostrarNumero() {
   u8g2.sendBuffer();
 }
 
-// ----------------------------------------------------------------------------
-// 5. Persistencia de nonces (evita que ChirpStack rechace el join tras reiniciar)
-// ----------------------------------------------------------------------------
-// En OTAA cada Join Request lleva un DevNonce que NO puede repetirse. RadioLib
-// lo lleva como contador; si tras un reinicio empezara otra vez desde 0,
-// ChirpStack respondería "DevNonce already used" y nunca haríamos join.
-// Guardamos el buffer de nonces en la flash (NVS) y lo restauramos al arrancar.
+// ---------------- Nonces en NVS ----------------
+// Si el DevNonce se repite tras reiniciar, ChirpStack rechaza el join
 void noncesRestaurar() {
-  prefs.begin("lorawan", /*readOnly=*/false);
+  prefs.begin("lorawan", false);
   uint8_t buf[RADIOLIB_LORAWAN_NONCES_BUF_SIZE];
   size_t n = prefs.getBytes("nonces", buf, sizeof(buf));
   if (n == sizeof(buf)) {
@@ -144,37 +97,28 @@ void noncesGuardar() {
   Serial.println("[NVS] nonces guardados");
 }
 
-// ----------------------------------------------------------------------------
-// 6. Inicialización de la radio, join OTAA y paso a Clase C
-// ----------------------------------------------------------------------------
+// ---------------- Radio y LoRaWAN ----------------
 void radioInit() {
-  // begin(freq, bw, sf, cr, syncWord, power, preamble, tcxoVoltage, useLDO)
-  // Sólo importan los dos últimos: la Heltec V3 lleva un TCXO alimentado por
-  // DIO3 a 1.8 V. El resto de parámetros los sobreescribe la pila LoRaWAN.
+  // TCXO a 1.8 V, el resto lo configura la pila LoRaWAN
   int16_t st = radio.begin(868.0, 125.0, 9, 7, RADIOLIB_SX126X_SYNC_WORD_PRIVATE,
-                           10, 8, /*tcxoVoltage=*/1.8, /*useRegulatorLDO=*/false);
+                           10, 8, 1.8, false);
   if (st != RADIOLIB_ERR_NONE) {
     Serial.printf("[RADIO] fallo en begin(): %d\n", st);
     oledEstado("Error radio", "ver monitor serie");
     while (true) delay(1000);
   }
 
-  // En la Heltec V3 el conmutador de antena (TX/RX) lo controla el pin DIO2
-  // del propio SX1262. Sin esto transmite, pero la antena no está conectada.
-  radio.setDio2AsRfSwitch(true);
+  radio.setDio2AsRfSwitch(true);   // conmutador de antena
   Serial.println("[RADIO] SX1262 OK");
 }
 
-// Cambia el nodo a Clase C. Según RadioLib, el cambio se completa cuando se
-// recibe un downlink; lo forzamos enviando un uplink CONFIRMADO, al que
-// ChirpStack responde siempre con un ACK. Después de eso la radio queda
-// escuchando permanentemente en RX2 (869.525 MHz, SF12 en EU868).
+// Uplink confirmado para que el cambio a Clase C se complete con el ACK
 void activarClaseC() {
   node.setClass(RADIOLIB_LORAWAN_CLASS_C);
 
   uint8_t hola[1] = { 0xC0 };
   for (int i = 1; i <= 5; i++) {
-    int16_t st = node.sendReceive(hola, sizeof(hola), FPORT, /*isConfirmed=*/true);
+    int16_t st = node.sendReceive(hola, sizeof(hola), FPORT, true);
     if (st > 0) {
       Serial.println("[LORAWAN] Clase C activa (ACK recibido)");
       return;
@@ -182,19 +126,14 @@ void activarClaseC() {
     Serial.printf("[LORAWAN] sin ACK (estado %d), reintento %d/5\n", st, i);
     delay(5000);
   }
-  // Si no hubo ACK seguimos igualmente: el siguiente uplink lo completará.
   Serial.println("[LORAWAN] Clase C pendiente de confirmar");
 }
 
 void lorawanJoin() {
-  // Credenciales. nwkKey = NULL => LoRaWAN 1.0.x (perfil típico en ChirpStack).
-  // Para 1.1.x: node.beginOTAA(JOIN_EUI, DEV_EUI, LORAWAN_NWK_KEY, LORAWAN_APP_KEY)
-  node.beginOTAA(LORAWAN_JOIN_EUI, LORAWAN_DEV_EUI, /*nwkKey=*/NULL, LORAWAN_APP_KEY);
+  node.beginOTAA(LORAWAN_JOIN_EUI, LORAWAN_DEV_EUI, NULL, LORAWAN_APP_KEY);   // LoRaWAN 1.0.x
 
   noncesRestaurar();
 
-  // Reintenta el join hasta conseguirlo. activateOTAA() envía el Join Request,
-  // espera el Join Accept y configura canales, DevAddr, claves de sesión...
   int intento = 0;
   while (true) {
     intento++;
@@ -204,10 +143,9 @@ void lorawanJoin() {
     Serial.printf("[LORAWAN] Join intento %d\n", intento);
 
     int16_t st = node.activateOTAA();
-    // RADIOLIB_LORAWAN_NEW_SESSION es el valor "bueno": sesión nueva creada.
     if (st == RADIOLIB_LORAWAN_NEW_SESSION) {
       Serial.println("[LORAWAN] Join OK");
-      noncesGuardar();          // ya hemos consumido un DevNonce: persistirlo
+      noncesGuardar();
       oledEstado("Join OK", "activando clase C");
       activarClaseC();
       return;
@@ -218,12 +156,8 @@ void lorawanJoin() {
   }
 }
 
-// ----------------------------------------------------------------------------
-// 7. Decodificación del downlink
-// ----------------------------------------------------------------------------
-// El codec de ChirpStack (encodeDownlink) convierte { "valor": N } en bytes
-// binarios big-endian. Aquí hacemos la operación inversa: 1..4 bytes -> entero.
-// Ej.: [0xC8] -> 200 ; [0x01, 0x2C] -> 300
+// ---------------- Downlink ----------------
+// [0xC8] -> 200, [0x01, 0x2C] -> 300
 bool decodificarNumero(const uint8_t* data, size_t len, int32_t& out) {
   if (len == 0 || len > 4) return false;
   uint32_t acc = 0;
@@ -232,8 +166,6 @@ bool decodificarNumero(const uint8_t* data, size_t len, int32_t& out) {
   return true;
 }
 
-// Procesa un downlink ya recibido (sirve tanto para los de Clase C como para
-// los que llegan en RX1/RX2 tras un uplink).
 void procesarDownlink(const uint8_t* data, size_t len, const LoRaWANEvent_t& ev) {
   Serial.printf("[LORAWAN] downlink fPort=%u fCnt=%lu datos=", ev.fPort, (unsigned long)ev.fCnt);
   for (size_t i = 0; i < len; i++) Serial.printf("%02X ", data[i]);
@@ -249,12 +181,6 @@ void procesarDownlink(const uint8_t* data, size_t len, const LoRaWANEvent_t& ev)
   oledMostrarNumero();
 }
 
-// ----------------------------------------------------------------------------
-// 8. Recepción Clase C y uplink de latido
-// ----------------------------------------------------------------------------
-// Comprueba si la radio ha captado un downlink de Clase C (RX2 continuo).
-// getDownlinkClassC() sólo mira un flag interno: es muy barato llamarla
-// en cada vuelta del loop.
 void comprobarDownlinkClaseC() {
   uint8_t down[64];
   size_t  downLen = 0;
@@ -266,9 +192,8 @@ void comprobarDownlinkClaseC() {
   }
 }
 
+// Latido: envia el numero mostrado (0xFFFF si no hay)
 void enviarLatido() {
-  // Payload de subida: el número que estamos mostrando (2 bytes big-endian).
-  // Es sólo informativo (latido): en Clase C los downlinks no dependen de él.
   uint16_t valor = (ultimoNumero < 0) ? 0xFFFF : (uint16_t)ultimoNumero;
   uint8_t up[2] = { (uint8_t)(valor >> 8), (uint8_t)(valor & 0xFF) };
 
@@ -276,13 +201,8 @@ void enviarLatido() {
   size_t  downLen = 0;
   LoRaWANEvent_t evDown;
 
-  // sendReceive() transmite, espera RX1 y RX2, y devuelve:
-  //   >0  ventana en la que llegó el downlink (1 = RX1, 2 = RX2)
-  //    0  uplink enviado, sin downlink
-  //   <0  error (ver RADIOLIB_ERR_*)
-  // Al terminar, RadioLib vuelve sola a la escucha continua de Clase C.
   int16_t st = node.sendReceive(up, sizeof(up), FPORT, down, &downLen,
-                                /*isConfirmed=*/false, /*eventUp=*/NULL, &evDown);
+                                false, NULL, &evDown);
 
   if (st < RADIOLIB_ERR_NONE) {
     Serial.printf("[LORAWAN] sendReceive error: %d\n", st);
@@ -294,16 +214,12 @@ void enviarLatido() {
                 (unsigned long)uplinksEnviados, st, (unsigned)downLen);
 
   if (st > 0 && downLen > 0) {
-    // ChirpStack aprovechó la ventana RX1/RX2 para mandar un downlink
-    procesarDownlink(down, downLen, evDown);
+    procesarDownlink(down, downLen, evDown);   // downlink en RX1/RX2
   } else {
-    oledMostrarNumero();   // refrescar el contador de uplinks
+    oledMostrarNumero();
   }
 }
 
-// ----------------------------------------------------------------------------
-// 9. setup() / loop()
-// ----------------------------------------------------------------------------
 void setup() {
   Serial.begin(115200);
   delay(1500);
@@ -319,11 +235,8 @@ void setup() {
 }
 
 void loop() {
-  // 1) ¿Ha llegado algo por la escucha continua de Clase C? (cada vuelta)
   comprobarDownlinkClaseC();
 
-  // 2) Latido periódico. Sin delay() bloqueante largo, para poder añadir
-  //    botones, sensores, etc. sin parar el loop.
   if (millis() - ultimoUplinkMs >= UPLINK_INTERVAL_MS) {
     ultimoUplinkMs = millis();
     enviarLatido();

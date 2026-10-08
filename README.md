@@ -13,7 +13,6 @@ ahí, comunicación LoRaWAN con un servidor ChirpStack, primero enviando datos
 | `Prueba 3 Prototipo uplink` | Heltec WiFi LoRa 32 V3 | Arduino + RadioLib | sep 2026 | Primer join OTAA y envío de datos a ChirpStack |
 | `Prueba 4 Sensor` | Heltec WiFi LoRa 32 V3 + DHT11 | Arduino + RadioLib | sep 2026 | Envío de temperatura y humedad reales |
 | `Prueba 5 Prototipo downlink` | Heltec WiFi LoRa 32 V3 (OLED) | Arduino + RadioLib + U8g2 | sep 2026 | Recepción de datos desde ChirpStack en Clase C |
-| `Rele` | Heltec WiFi LoRa 32 V3 + módulo de relé | Arduino | sep 2026 | Actuador: control de un relé (en desarrollo) |
 
 La Heltec WiFi LoRa 32 V3 lleva un ESP32-S3 y un transceptor LoRa SX1262.
 Todas las pruebas LoRaWAN trabajan en la banda europea EU868.
@@ -109,23 +108,6 @@ Frontend -> API de ChirpStack -> Gateway -> SX1262 -> OLED
   el puerto 1, para que ChirpStack vea el dispositivo activo.
 
 Las credenciales están en `include/credentials.h`.
-
-## Rele
-
-Nodo actuador que controla un módulo de relé de 4 canales, del que de momento
-solo se usa el canal 1 (GPIO 4, activo en bajo). Está en su **fase 1: control
-local**, sin LoRaWAN:
-
-- órdenes por puerto serie: `ON`, `OFF`, `TOGGLE`, `STATUS`, `HELP`;
-- pulsador en GPIO 6 con antirrebote por software (250 ms).
-
-La clase `RelayController` (`lib/RelayController/`) es el único punto que
-actúa sobre el relé. Arranca en estado seguro, sin pulsos al reiniciar, y
-cuenta las conmutaciones.
-
-Para la fase 2 ya están preparados el codec de ChirpStack con órdenes
-ON/OFF/TOGGLE/PULSO (`chirpstack/codec.js`) y un borrador del firmware en
-Clase C (`docs/borrador_fase2/`). Más detalle en [`Rele/README.md`](Rele/README.md).
 
 ---
 
