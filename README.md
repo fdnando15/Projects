@@ -6,13 +6,13 @@ microcontrolador, después un sistema operativo de tiempo real y, a partir de
 ahí, comunicación LoRaWAN con un servidor ChirpStack, primero enviando datos
 (uplink) y después recibiendo órdenes (downlink).
 
-| Carpeta | Placa | Framework | Fecha | Objetivo |
-|---|---|---|---|---|
-| `Prueba 1 Arduino` | Arduino Uno | Arduino | abr 2026 | Multitarea sin bloqueos con `millis()` |
-| `Prueba 2 RTOS` | Heltec WiFi LoRa 32 V3 | ESP-IDF (FreeRTOS) | may 2026 | La misma multitarea con tareas de FreeRTOS |
-| `Prueba 3 Prototipo uplink` | Heltec WiFi LoRa 32 V3 | Arduino + RadioLib | sep 2026 | Primer join OTAA y envío de datos a ChirpStack |
-| `Prueba 4 Sensor` | Heltec WiFi LoRa 32 V3 + DHT11 | Arduino + RadioLib | sep 2026 | Envío de temperatura y humedad reales |
-| `Prueba 5 Prototipo downlink` | Heltec WiFi LoRa 32 V3 (OLED) | Arduino + RadioLib + U8g2 | sep 2026 | Recepción de datos desde ChirpStack en Clase C |
+| Carpeta                       | Placa                          | Framework                 | Fecha modificación | Objetivo                                       |
+| ----------------------------- | ------------------------------ | ------------------------- | ------------------ | ---------------------------------------------- |
+| `Prueba 1 Arduino`            | Arduino Uno                    | Arduino                   | abr 2026           | Multitarea sin bloqueos con `millis()`         |
+| `Prueba 2 RTOS`               | Heltec WiFi LoRa 32 V3         | ESP-IDF (FreeRTOS)        | may 2026           | La misma multitarea con tareas de FreeRTOS     |
+| `Prueba 3 Prototipo uplink`   | Heltec WiFi LoRa 32 V3         | Arduino + RadioLib        | sep 2026           | Primer join OTAA y envío de datos a ChirpStack |
+| `Prueba 4 Sensor`             | Heltec WiFi LoRa 32 V3 + DHT11 | Arduino + RadioLib        | sep 2026           | Envío de temperatura y humedad reales          |
+| `Prueba 5 Prototipo downlink` | Heltec WiFi LoRa 32 V3 (OLED)  | Arduino + RadioLib + U8g2 | sep 2026           | Recepción de datos desde ChirpStack en Clase C |
 
 La Heltec WiFi LoRa 32 V3 lleva un ESP32-S3 y un transceptor LoRa SX1262.
 Todas las pruebas LoRaWAN trabajan en la banda europea EU868.
@@ -59,15 +59,16 @@ Primer nodo **LoRaWAN** conectado a ChirpStack mediante la librería RadioLib.
 
 ## Prueba 4 Sensor
 
+NO completado
 Nodo LoRaWAN que mide temperatura y humedad con un **DHT11** (GPIO 4) y las
 envía a ChirpStack cada 60 s por el puerto 10.
 
 **Formato del payload** (4 bytes, big-endian):
 
-| Bytes | Tipo | Contenido |
-|---|---|---|
-| 0–1 | `int16` | Temperatura en centésimas de °C (2350 = 23,50 °C) |
-| 2–3 | `uint16` | Humedad en centésimas de % (4520 = 45,20 %) |
+| Bytes | Tipo     | Contenido                                         |
+| ----- | -------- | ------------------------------------------------- |
+| 0–1   | `int16`  | Temperatura en centésimas de °C (2350 = 23,50 °C) |
+| 2–3   | `uint16` | Humedad en centésimas de % (4520 = 45,20 %)       |
 
 `chirpstack/codec.js` es el decodificador que se carga en el perfil del
 dispositivo en ChirpStack. Convierte esos bytes en los campos `temperature`

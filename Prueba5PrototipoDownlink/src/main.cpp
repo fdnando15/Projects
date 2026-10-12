@@ -34,7 +34,7 @@ static int32_t  ultimoNumero    = -1;      // -1 = nada recibido aun
 static uint32_t uplinksEnviados = 0;
 static uint32_t ultimoUplinkMs  = 0;
 
-// ---------------- OLED ----------------
+// Visualización por OLED
 void oledInit() {
   pinMode(VEXT_PIN, OUTPUT);
   digitalWrite(VEXT_PIN, LOW);
@@ -77,7 +77,7 @@ void oledMostrarNumero() {
   u8g2.sendBuffer();
 }
 
-// ---------------- Nonces en NVS ----------------
+// Tratamiento Devnonces
 // Si el DevNonce se repite tras reiniciar, ChirpStack rechaza el join
 void noncesRestaurar() {
   prefs.begin("lorawan", false);

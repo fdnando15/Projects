@@ -8,7 +8,7 @@ LoRaWANNode node(&radio, &EU868);
 
 Preferences store;
 
-// ===== CREDENCIALES (formato MSB, igual que en ChirpStack) =====
+// Configuración chiroptack
 uint64_t joinEUI = 0x0000000000000000;
 uint64_t devEUI  = 0xE1C0D773FF5B7E7B;
 
@@ -16,8 +16,8 @@ uint8_t appKey[] = {
   0x4F, 0x0B, 0xA4, 0x3D, 0xD2, 0xD6, 0xF3, 0xD2,
   0xFC, 0x79, 0x86, 0x55, 0xE4, 0xC9, 0x19, 0x94
 };
-// ===============================================================
 
+// Tratamiento devnonces
 void guardarNonces() {
   uint8_t *nonces = node.getBufferNonces();
   store.putBytes("nonces", nonces, RADIOLIB_LORAWAN_NONCES_BUF_SIZE);

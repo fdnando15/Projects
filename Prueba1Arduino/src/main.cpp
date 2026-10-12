@@ -13,7 +13,7 @@ void imprimirLatido() {
 }
 
 void imprimirInforme() {
-  Serial.println("--- Informe #" + String(nInforme) + " ---");
+  Serial.println("Informe #" + String(nInforme) + "");
   nInforme++;
 }
 
